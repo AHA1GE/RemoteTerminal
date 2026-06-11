@@ -134,18 +134,18 @@ Cloudflare Tunnel connects to the local HTTPS endpoint. The tunnel handles publi
 
 ## Certificate Management
 
-On startup, the binary looks for these files in its own directory:
+The user must provide a TLS certificate and key in the binary's directory:
 
 ```text
 cert.pem
 key.pem
 ```
 
-If both files exist, they are loaded and used.
+The binary loads these files on startup. The certificate is NOT auto-generated — it must be placed by the user before starting the server.
 
-If either file is missing, the binary generates a new self-signed certificate pair and writes both files to its directory. The generated certificate uses the value of `cert_cn` from `config.yaml` as the CN and SAN.
+If either file is missing or invalid, the binary logs a fatal error and exits.
 
-Subsequent restarts reuse the persisted certificate.
+The user can generate a self-signed certificate with any TLS tool (e.g. `openssl`, `mkcert`, or PowerShell's `New-SelfSignedCertificate`). Cloudflare Tunnel connects with TLS verification disabled, so a self-signed cert is sufficient.
 
 ## Listen Address
 
@@ -760,8 +760,6 @@ listen: 127.0.0.1:8443
 
 password_hash: <argon2id>
 
-cert_cn: remote-terminal.local
-
 default_command:
   - pwsh.exe
 
@@ -986,8 +984,7 @@ On these errors, log at `error` level and call `os.Exit(1)`:
 ```text
 - config.yaml not found
 - password_hash not set in config.yaml
-- TLS certificate generation fails
-- TLS certificate loading fails
+- TLS certificate not found or invalid (cert.pem + key.pem must exist in binary directory)
 - listen address already in use
 - embedded static files fail to load (compile-time issue, should never happen)
 ```
@@ -1046,11 +1043,12 @@ When the binary runs, it executes in this order:
        → Continue to step 3
 
 3. Look for cert.pem + key.pem in the binary's directory
-   ├── Not found:
-   │   → Generate self-signed certificate pair
-   │   → Write cert.pem + key.pem to binary directory
+   ├── Not found or invalid:
+   │   → Log fatal error
+   │   → Print: "Place cert.pem and key.pem in the binary directory and restart."
+   │   → Exit (non-zero)
    │
-   └── Found:
+   └── Found and valid:
        → Load and use them
 
 4. Print help info to stdout
@@ -1068,7 +1066,6 @@ remote-terminal v1.0.0
 Config:   <binary-dir>/config.yaml
 Cert:     <binary-dir>/cert.pem
 Key:      <binary-dir>/key.pem
-Cert CN:  remote-terminal.local
 Listen:   127.0.0.1:8443
 Log level: debug
 ```
@@ -1157,7 +1154,7 @@ Artifacts published automatically on tagged releases.
 * CLI tools run correctly inside a PTY (shell, editors, REPLs)
 * Safari works (desktop and iPhone)
 * Mobile viewport meta renders correctly on iPhone
-* Self-signed TLS cert generated on first start, reused on subsequent starts
+* TLS cert loaded from cert.pem + key.pem (user-provided, no auto-generation)
 * Cloudflare Tunnel works (connects to https://127.0.0.1:8443)
 * Graceful shutdown on SIGINT/SIGTERM
 * Structured JSON logging to stdout (debug/error/none via log_level config)
@@ -1173,5 +1170,4 @@ Artifacts published automatically on tagged releases.
 * Ring buffer replays from most recent safe replay point on reconnect
 * IP blacklisted permanently after 5 failed login attempts
 * blacklist.txt written to binary directory, loaded on startup
-* cert_cn read from config.yaml, used for self-signed cert CN and SAN
 * CF-Connecting-IP header used for client IP, with direct-address fallback
