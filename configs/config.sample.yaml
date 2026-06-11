@@ -1,0 +1,23 @@
+# Remote Terminal configuration
+# Copy this file to the same directory as the binary and rename to config.yaml
+
+listen: 127.0.0.1:8443
+
+# Argon2id password hash.
+# Generate with any argon2id tool using salt length 16, time=3, memory=65536,
+# threads=2, key length=32. The binary will print a generated hash on first run
+# if password_hash is not yet configured.
+password_hash: <argon2id>
+
+# Default command launched in new PTY sessions
+default_command:
+  - pwsh.exe
+
+# Maximum concurrent PTY sessions
+max_sessions: 32
+
+# Ring buffer size per session in bytes (1 MB default)
+buffer_size: 1048576
+
+# Log level: debug, error, none
+log_level: debug
