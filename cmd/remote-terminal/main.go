@@ -21,8 +21,10 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
-	"github.com/AHA1GE/RemoteTerminal/assets"
 	"github.com/AHA1GE/RemoteTerminal/internal/config"
+
+	// Root-level assets package (embed.go with //go:embed web/*)
+	assets "github.com/AHA1GE/RemoteTerminal"
 )
 
 // version is set at build time via -ldflags.
