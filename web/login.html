@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Remote Terminal — Login</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  form { background: #16213e; padding: 2rem; border-radius: 8px; width: 320px; }
+  h1 { font-size: 1.25rem; text-align: center; margin-bottom: 1.5rem; color: #e94560; }
+  label { display: block; font-size: 0.85rem; margin-bottom: 0.25rem; color: #aaa; }
+  input { width: 100%; padding: 0.6rem; margin-bottom: 1rem; border: 1px solid #333; border-radius: 4px; background: #0f3460; color: #eee; font-size: 1rem; }
+  button { width: 100%; padding: 0.6rem; border: none; border-radius: 4px; background: #e94560; color: #fff; font-size: 1rem; cursor: pointer; }
+  .error { color: #e94560; font-size: 0.85rem; margin-bottom: 0.5rem; display: none; }
+</style>
+</head>
+<body>
+<form id="login-form">
+  <h1>Remote Terminal</h1>
+  <label for="password">Passcode</label>
+  <input type="password" id="password" name="password" autocomplete="current-password" required>
+  <input type="hidden" id="csrf-token" name="csrf_token">
+  <div class="error" id="error"></div>
+  <button type="submit">Login</button>
+</form>
+<script src="app.js"></script>
+</body>
+</html>
