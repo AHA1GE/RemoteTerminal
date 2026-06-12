@@ -126,12 +126,13 @@ Sample at `configs/config.sample.yaml`.
 3. Load `config.yaml`; if missing, generate default and exit with instructions
 4. If `password_text` is set → hash it → write `password_hash` → remove `password_text` → save → continue
 5. If `password_hash` is still placeholder and `password_text` is empty → ensure `password_text` field exists in config → print message → exit
-6. Load `cert.pem` + `key.pem` (fatal if missing or invalid)
-7. Load `blacklist.txt` (missing file is OK, starts empty)
-8. Set log level from config
-9. Print startup info (version, config path, cert path, listen addr, log level)
-10. Start HTTPS server with TLS 1.2+
-11. Wait for SIGINT/SIGTERM
+6. Set log level from config
+7. Validate `default_command` is executable via `exec.LookPath` (fatal if not found)
+8. Load `cert.pem` + `key.pem` (fatal if missing or invalid)
+9. Load `blacklist.txt` (missing file is OK, starts empty)
+10. Print startup info (version, config path, cert path, listen addr, log level)
+11. Start HTTPS server with TLS 1.2+
+12. Wait for SIGINT/SIGTERM
 
 ### Graceful shutdown
 

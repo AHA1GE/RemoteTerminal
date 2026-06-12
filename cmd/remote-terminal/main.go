@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -687,6 +688,17 @@ func main() {
 
 	// 5. Set log level
 	log.level = parseLogLevel(cfg.LogLevel)
+
+	// 5a. Validate default_command is executable (fatal if not found).
+	if len(cfg.DefaultCommand) > 0 {
+		if _, err := exec.LookPath(cfg.DefaultCommand[0]); err != nil {
+			log.Error("default_command not found", map[string]interface{}{
+				"command": cfg.DefaultCommand[0],
+				"error":   err.Error(),
+			})
+			os.Exit(1)
+		}
+	}
 
 	// 6. Load TLS certificate (user must provide cert.pem + key.pem)
 	certPath := filepath.Join(exeDir, "cert.pem")

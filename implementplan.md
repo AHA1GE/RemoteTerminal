@@ -995,6 +995,7 @@ On these errors, log at `error` level and call `os.Exit(1)`:
 - config.yaml not found
 - password not configured (password_text is empty and password_hash is still the placeholder)
 - TLS certificate not found or invalid (cert.pem + key.pem must exist in binary directory)
+- default_command not found (binary not on PATH)
 - listen address already in use
 - embedded static files fail to load (compile-time issue, should never happen)
 ```
@@ -1071,11 +1072,13 @@ When the binary runs, it executes in this order:
    └── Found and valid:
        → Load and use them
 
-4. Load blacklist.txt (missing file is OK)
+4. Validate default_command is executable via LookPath (fatal if not found)
 
-5. Print help info to stdout
+5. Load blacklist.txt (missing file is OK)
 
-6. Start HTTPS server
+6. Print help info to stdout
+
+7. Start HTTPS server
 ```
 
 ## Help Output
