@@ -11,7 +11,8 @@ import (
 // Config holds all configuration values.
 type Config struct {
 	Listen         string   `yaml:"listen"`
-	PasswordHash   string   `yaml:"password_hash"`
+	PasswordHash   string   `yaml:"password_hash,omitempty"`
+	PasswordText   *string  `yaml:"password_text,omitempty"`
 	DefaultCommand []string `yaml:"default_command"`
 	MaxSessions    int      `yaml:"max_sessions"`
 	BufferSize     int      `yaml:"buffer_size"`
@@ -20,9 +21,11 @@ type Config struct {
 
 // Default returns a Config with sensible defaults.
 func Default() Config {
+	emptyText := ""
 	return Config{
 		Listen:         "127.0.0.1:8443",
 		PasswordHash:   "<argon2id>",
+		PasswordText:   &emptyText,
 		DefaultCommand: []string{"pwsh.exe"},
 		MaxSessions:    32,
 		BufferSize:     1048576,
