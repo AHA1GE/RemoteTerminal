@@ -15,7 +15,7 @@ go build -ldflags="-s -w -X main.version=$(git describe --tags --always)" -o RT 
 # Vet
 go vet ./...
 
-# Tidy dependencies
+# Tidy dependencies (also generates go.sum)
 go mod tidy
 
 # Run (requires config.yaml, cert.pem, key.pem in working directory)
@@ -28,33 +28,67 @@ CI (`go mod tidy` then `go vet ./...` then `CGO_ENABLED=0 go build`) runs on eve
 
 ### Module structure
 
-The Go module is `github.com/AHA1GE/RemoteTerminal` (Go 1.21). There are two packages:
+Module `github.com/AHA1GE/RemoteTerminal` (Go 1.21). Five packages:
 
-- **Root `assets` package** (`embed.go`) — a single `//go:embed web/*` directive exposing `assets.FS`. Imported by `main` as a separate package (not dot-imported).
-- **`internal/config/config.go`** — `Config` struct, YAML load/save, `ExeDir()` and `Path()` helpers. All paths are relative to the binary's directory.
+| Package | Path | Purpose |
+|---|---|---|
+| `assets` | `embed.go` (root) | `//go:embed web/*` — exposes `assets.FS` |
+| `config` | `internal/config/config.go` | `Config` struct, YAML load/save, `ExeDir()`/`Path()` helpers |
+| `pty` | `internal/pty/` | `CircularBuffer` with safe replay points, `PtySession` + `PtySessionStore` |
+| `auth` | `internal/auth/blacklist.go` | `IPBlacklist` — 5-strike brute-force protection, `CF-Connecting-IP` support |
+| `websocket` | `internal/websocket/handler.go` | WebSocket upgrade, PTY output streaming, input multiplexing |
 
-Everything else currently lives flat in `cmd/remote-terminal/main.go` (636 lines). The plan calls for splitting into `internal/auth/`, `internal/pty/`, `internal/session/`, `internal/websocket/`, and `internal/web/` — none of these exist yet.
+Everything is wired in `cmd/remote-terminal/main.go` (753 lines).
 
-### Request flow (what exists today)
+### Request flow
 
 ```
 Browser → HTTPS (TLS 1.2+, self-signed cert) → Go net/http mux
-                                                  ├── /healthz        (public)
-                                                  ├── /login          (public GET/POST)
-                                                  ├── /app.js         (public, static)
-                                                  ├── /, /terminal/*  (authMiddleware → redirect to /login)
-                                                  └── /api/*, /logout (apiAuthMiddleware → 401 JSON)
+                                                  ├── /healthz          (public)
+                                                  ├── /login            (public GET/POST)
+                                                  ├── /app.js           (public, static)
+                                                  ├── /ws/              (wsAuthMiddleware → 401)
+                                                  ├── /, /terminal/*    (authMiddleware → redirect to /login)
+                                                  └── /api/*, /logout   (apiAuthMiddleware → 401 JSON)
 ```
 
-The router is hand-rolled in `setupRoutes()` using `http.NewServeMux` with a two-level dispatch: a top-level mux routes by path prefix, then sub-muxes (`protectedPage`, `protectedAPI`) handle exact path matching.
+The router is hand-rolled in `setupRoutes()` using `http.NewServeMux`. WebSocket (`/ws/`) is registered directly on the root mux before the catch-all. Page and API routes use sub-muxes (`protectedPage`, `protectedAPI`) behind auth middleware.
 
 ### Auth model
 
-- **Password**: Argon2id stored in `config.yaml` as `$argon2id$v=19$m=...,t=...,p=...$salt$hash`. Verified with `subtle.ConstantTimeCompare`.
+- **Password setup**: On first run, config is generated with an empty `password_text` field. The user sets a plaintext password, restarts, and the binary hashes it (Argon2id), writes the hash to `password_hash`, and removes `password_text` from the file. To reset: add `password_text` back with a new value and restart.
+- **Password verification**: Argon2id stored in `config.yaml` as `$argon2id$v=19$m=...,t=...,p=...$salt$hash`. Verified with `subtle.ConstantTimeCompare`.
 - **Sessions**: 256-bit `crypto/rand` tokens, base64-encoded, stored in an in-memory `SessionStore` (mutex-protected map). Two cookies:
   - `session_token` — HttpOnly, Secure, SameSite=Strict
   - `csrf_token` — Secure, SameSite=Strict, **not** HttpOnly (JS must read it)
 - **CSRF**: Double-submit cookie pattern. `ensureCSRF()` sets the cookie if absent; `validateCSRF()` compares body value vs cookie value with `ConstantTimeCompare`. Applied to all POST/DELETE routes.
+- **IP blacklist**: 5 failed login attempts from the same IP → permanent blacklist in `blacklist.txt` (loaded on startup, appended on blacklist event). `CF-Connecting-IP` header read first, `RemoteAddr` fallback. Loopback (`127.0.0.1`, `::1`) never blacklisted.
+
+### PTY sessions
+
+`PtySessionStore` holds in-memory `PtySession` objects with a configurable `max_sessions` cap. Each session owns a `go-pty` PTY (ConPTY on Windows, forkpty on Linux), a `CircularBuffer` ring buffer for output history, and a subscriber map for WebSocket output broadcast. A read-loop goroutine reads PTY output, writes to the ring buffer, and fans data to all connected WebSocket subscribers via non-blocking channel sends (slow subscribers are silently dropped and catch up via buffer replay on reconnect).
+
+Session lifecycle: PTY lifetime is independent of browser lifetime. Browsers are clients; PTYs are server-owned resources. Disconnecting a browser leaves the PTY process alive. Reconnecting replays the ring buffer from the most recent safe replay point, then attaches the live stream. When the process exits, subscriber channels are closed, signaling WebSocket handlers to send close frames.
+
+### Ring buffer with safe replay points
+
+`CircularBuffer` tracks monotonic logical byte offsets that never wrap, so safe replay points survive physical buffer wraps. Recognized safe-replay ANSI sequences: `\x1b[H`, `\x1b[2J`, `\x1b[3J`, `\x1b[H\x1b[2J`, `\x1b]0;`. On reconnect, output is replayed from the most recent safe point to avoid feeding xterm.js a truncated escape sequence.
+
+### WebSocket protocol
+
+```
+Browser → Server (binary):
+  <raw bytes>       = keyboard input / paste (only if active connection)
+  0x01 + {cols,rows} = resize event
+
+Server → Browser (binary):
+  <raw bytes>       = terminal output (buffer replay first, then live stream)
+  Close(1000)        = process exited
+```
+
+- **Input multiplexing**: First connection to send input becomes active. Idle connections are deactivated after 10 seconds (tracked via `LastSeenAt` on the session). Non-active connections have input silently dropped.
+- **Ping/pong**: Server pings every 30s. Read deadline is 40s (30s ping + 10s pong wait). Browsers auto-pong per RFC 6455 — no client code needed.
+- **Buffer replay**: On WebSocket connect, the ring buffer is replayed from the latest safe replay point; if no safe point exists, all available bytes are replayed.
 
 ### Frontend (static, no build step)
 
@@ -67,40 +101,58 @@ Four files in `web/`, embedded at compile time via `assets.FS`:
 | `terminal.html` | `GET /terminal/{id}` | Loads xterm.js 5.5.0 + fitAddon + webLinksAddon from CDN, then `app.js` |
 | `app.js` | `GET /app.js` | Single IIFE, page-type-dispatching by `window.location.pathname` |
 
-`app.js` handles all three page types. Login and session-list logic is complete. Terminal page initializes xterm.js correctly but has **placeholder code** for WebSocket — see gaps below.
+`app.js` handles all three page types: login (POST /login with CSRF), session list (fetch GET /api/sessions, render table, create/delete sessions), and terminal (WebSocket to `/ws/{id}` with binary ArrayBuffer receive, keyboard input forward, resize events as 0x01+JSON control frames, reconnect with 3s delay on non-1000 close).
 
 ### Configuration
 
-`config.yaml` lives next to the binary. Six fields: `listen`, `password_hash`, `default_command` (string array), `max_sessions`, `buffer_size`, `log_level`. Sample at `configs/config.sample.yaml`.
+`config.yaml` lives next to the binary. Seven fields:
 
-Startup flow: reject CLI args → load config (generate default + exit if missing) → validate password_hash is set (generate random password + print hash + exit if placeholder) → load TLS cert/key (fatal if missing) → print help → start HTTPS.
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `listen` | string | `127.0.0.1:8443` | HTTPS listen address |
+| `password_text` | string | (empty) | Plaintext password — hashed and removed on startup |
+| `password_hash` | string | `<argon2id>` | Argon2id hash (set automatically from `password_text`) |
+| `default_command` | []string | `[pwsh.exe]` | Command launched in new PTY sessions |
+| `max_sessions` | int | `32` | Maximum concurrent PTY sessions |
+| `buffer_size` | int | `1048576` | Ring buffer size per session (1 MB) |
+| `log_level` | string | `debug` | `debug`, `error`, or `none` |
+
+Sample at `configs/config.sample.yaml`.
+
+### Startup flow
+
+1. Reject any CLI arguments (print message, exit 1)
+2. Determine executable directory
+3. Load `config.yaml`; if missing, generate default and exit with instructions
+4. If `password_text` is set → hash it → write `password_hash` → remove `password_text` → save → continue
+5. If `password_hash` is still placeholder and `password_text` is empty → ensure `password_text` field exists in config → print message → exit
+6. Load `cert.pem` + `key.pem` (fatal if missing or invalid)
+7. Load `blacklist.txt` (missing file is OK, starts empty)
+8. Set log level from config
+9. Print startup info (version, config path, cert path, listen addr, log level)
+10. Start HTTPS server with TLS 1.2+
+11. Wait for SIGINT/SIGTERM
+
+### Graceful shutdown
+
+On SIGINT/SIGTERM, in order:
+1. Stop accepting new HTTP connections (5s timeout)
+2. Close all PTYs (closing the file descriptor terminates child processes via ConPTY)
+3. Close all WebSocket connections
+4. Exit (auth session store and PTY session store die with the process)
 
 ### Logger
 
 Custom structured JSON logger (~50 lines). Three levels: `debug`, `error`, `none`. Emits to stdout. Format: `{"time":"RFC3339","level":"...","msg":"...","key":"value",...}`. Uses a mutex for safe concurrent writes.
 
-## What is NOT yet implemented
-
-The auth layer, config, TLS, logger, CLI startup, and static asset serving are complete and match the plan in `implementplan.md`. The following subsystems are stubs or absent:
-
-1. **PTY management** — `POST /api/sessions` returns 501. `go-pty` not in go.mod. No `PtySession` struct, no ConPTY integration, no process lifecycle.
-2. **WebSocket** — `GET /ws/{id}` route not registered. `gorilla/websocket` not in go.mod. No upgrade handler, no ping/pong, no input/output streaming.
-3. **Ring buffer** — No circular buffer type. `buffer_size` from config is unused. No safe replay points.
-4. **Input multiplexing** — No active-connection tracking, no 10s deactivation timeout, no read-only enforcement.
-5. **IP blacklist** — No `blacklist.txt`, no per-IP failure counter, no `CF-Connecting-IP` header parsing.
-6. **Graceful shutdown** — Only step 1 (stop accepting HTTP) exists. Missing: PTY closure, child-process cleanup, WebSocket close, session-record removal.
-7. **`app.js` terminal WebSocket layer** — xterm.js is initialized but `onData` is an empty callback, no `new WebSocket()`, no reconnect logic, no resize-dimension forwarding to server.
-8. **`GET /api/sessions`** — Returns empty `[]` instead of real PTY session data.
-
-See `implementplan.md` for the full specification of each subsystem.
-
 ## Design constraints
 
 - Single binary, static assets embedded via `go:embed`
 - No database (all state in memory)
-- No external runtime dependencies
+- No external runtime dependencies beyond Go standard library
 - `cert.pem` + `key.pem` must be user-provided (no auto-generation)
 - Binary accepts zero CLI arguments
 - Hard-fault on fatal startup errors (log + `os.Exit(1)`); log-and-continue on runtime errors
 - Windows-first via ConPTY (`aymanbagabas/go-pty`), Linux via forkpty (same API)
+- `password_text` field is the only supported way to set/reset passwords — no CLI tools, no random generation
 - License: GPL-3.0
