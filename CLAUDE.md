@@ -10,7 +10,7 @@ Remote Terminal — a self-hosted, single-binary PTY manager. Browser and iPhone
 
 ```bash
 # Build (outputs RT.exe on Windows, RT on Linux)
-go build -ldflags="-s -w -X main.version=$(git describe --tags --always)" -o RT ./cmd/remote-terminal/
+CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$(git describe --tags --always)" -o RT ./cmd/remote-terminal/
 
 # Vet
 go vet ./...
@@ -38,7 +38,7 @@ Module `github.com/AHA1GE/RemoteTerminal` (Go 1.21). Five packages:
 | `auth` | `internal/auth/blacklist.go` | `IPBlacklist` — 5-strike brute-force protection, `CF-Connecting-IP` support |
 | `websocket` | `internal/websocket/handler.go` | WebSocket upgrade, PTY output streaming, input multiplexing |
 
-Everything is wired in `cmd/remote-terminal/main.go` (753 lines).
+Everything is wired in `cmd/remote-terminal/main.go` (778 lines).
 
 ### Request flow
 
@@ -52,7 +52,7 @@ Browser → HTTPS (TLS 1.2+, self-signed cert) → Go net/http mux
                                                   └── /api/*, /logout   (apiAuthMiddleware → 401 JSON)
 ```
 
-The router is hand-rolled in `setupRoutes()` using `http.NewServeMux`. WebSocket (`/ws/`) is registered directly on the root mux before the catch-all. Page and API routes use sub-muxes (`protectedPage`, `protectedAPI`) behind auth middleware.
+The router is hand-rolled in `setupRoutes()` using `http.NewServeMux`. WebSocket (`/ws/`) is registered directly on the root mux before the catch-all. Page and API routes use middleware-wrapped sub-handlers (`protectedPage`, `protectedAPI`) behind auth middleware.
 
 ### Auth model
 
@@ -77,7 +77,7 @@ Session lifecycle: PTY lifetime is independent of browser lifetime. Browsers are
 ### WebSocket protocol
 
 ```
-Browser → Server (binary):
+Browser → Server (text or binary):
   <raw bytes>       = keyboard input / paste (only if active connection)
   0x01 + {cols,rows} = resize event
 
