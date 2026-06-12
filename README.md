@@ -82,7 +82,7 @@ Requires Go 1.21+. Cross-compiles to Windows and Linux (amd64 + arm64). `CGO_ENA
 
 ## Features
 
-- **PTY sessions** — ConPTY on Windows, forkpty on Linux. Multiple concurrent sessions, configurable command.
+- **PTY sessions** — cross-platform via `go-pty` (ConPTY on Windows, POSIX openpt on Unix). Multiple concurrent sessions, configurable command.
 - **WebSocket transport** — raw terminal stream, no JSON RPC layer. Text and binary frames both accepted.
 - **Input multiplexing** — multiple browser tabs can watch the same session. Only one sends input at a time; idle connections deactivate after 10 seconds.
 - **Ring buffer** — 1 MB per session. Replays output on reconnect from safe ANSI boundaries (clear screen, cursor home) to avoid garbled rendering.
@@ -111,7 +111,7 @@ Go net/http mux
                 |
         WebSocket (gorilla/websocket)
                 |
-        PTY (go-pty → ConPTY / forkpty)
+        PTY (go-pty → ConPTY / POSIX openpt)
                 |
         Shell / CLI tools
 ```

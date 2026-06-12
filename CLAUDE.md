@@ -66,7 +66,7 @@ The router is hand-rolled in `setupRoutes()` using `http.NewServeMux`. WebSocket
 
 ### PTY sessions
 
-`PtySessionStore` holds in-memory `PtySession` objects with a configurable `max_sessions` cap. Each session owns a `go-pty` PTY (ConPTY on Windows, forkpty on Linux), a `CircularBuffer` ring buffer for output history, and a subscriber map for WebSocket output broadcast. A read-loop goroutine reads PTY output, writes to the ring buffer, and fans data to all connected WebSocket subscribers via non-blocking channel sends (slow subscribers are silently dropped and catch up via buffer replay on reconnect).
+`PtySessionStore` holds in-memory `PtySession` objects with a configurable `max_sessions` cap. Each session owns a `go-pty` PTY (ConPTY on Windows, POSIX openpt on Unix), a `CircularBuffer` ring buffer for output history, and a subscriber map for WebSocket output broadcast. A read-loop goroutine reads PTY output, writes to the ring buffer, and fans data to all connected WebSocket subscribers via non-blocking channel sends (slow subscribers are silently dropped and catch up via buffer replay on reconnect).
 
 Session lifecycle: PTY lifetime is independent of browser lifetime. Browsers are clients; PTYs are server-owned resources. Disconnecting a browser leaves the PTY process alive. Reconnecting replays the ring buffer from the most recent safe replay point, then attaches the live stream. When the process exits, subscriber channels are closed, signaling WebSocket handlers to send close frames.
 
@@ -154,6 +154,6 @@ Custom structured JSON logger (~50 lines). Three levels: `debug`, `error`, `none
 - `cert.pem` + `key.pem` must be user-provided (no auto-generation)
 - Binary accepts zero CLI arguments
 - Hard-fault on fatal startup errors (log + `os.Exit(1)`); log-and-continue on runtime errors
-- Windows-first via ConPTY (`aymanbagabas/go-pty`), Linux via forkpty (same API)
+- Windows-first via ConPTY (`aymanbagabas/go-pty`), Unix via POSIX openpt (same API)
 - `password_text` field is the only supported way to set/reset passwords — no CLI tools, no random generation
 - License: GPL-3.0

@@ -723,7 +723,7 @@ through `aymanbagabas/go-pty`:
 https://pkg.go.dev/github.com/aymanbagabas/go-pty
 ```
 
-This library provides a unified API across Windows (ConPTY) and Unix (forkpty), so the same code works on both platforms.
+This library provides a unified API across Windows (ConPTY) and Unix (POSIX openpt), so the same code works on both platforms.
 
 Primary target platform.
 
@@ -736,7 +736,7 @@ Future milestone.
 Use:
 
 ```text
-forkpty()
+POSIX openpt (open("/dev/ptmx") + ioctl)
 ```
 
 through `aymanbagabas/go-pty` — same API, no code changes needed.
