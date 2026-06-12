@@ -57,7 +57,7 @@ func NewPtySessionStore(max int) *PtySessionStore {
 // Create starts a new PTY running cmd, allocates a ring buffer, and launches a
 // read-loop goroutine that broadcasts output to subscribers. width and height
 // set the initial terminal size in cols/rows.
-func (s *PtySessionStore) Create(cmd []string, width, height, bufferSize int) (*PtySession, error) {
+func (s *PtySessionStore) Create(cmd []string, width, height, bufferSize int, workDir string) (*PtySession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -85,6 +85,9 @@ func (s *PtySessionStore) Create(cmd []string, width, height, bufferSize int) (*
 	// Launch the configured command inside the PTY.
 	name, args := cmd[0], cmd[1:]
 	c := pt.Command(name, args...)
+	if workDir != "" {
+		c.Dir = workDir
+	}
 	if err := c.Start(); err != nil {
 		pt.Close()
 		return nil, fmt.Errorf("start command: %w", err)

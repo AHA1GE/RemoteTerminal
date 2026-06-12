@@ -105,7 +105,7 @@ Four files in `web/`, embedded at compile time via `assets.FS`:
 
 ### Configuration
 
-`config.yaml` lives next to the binary. Seven fields:
+`config.yaml` lives next to the binary. Eight fields:
 
 | Field | Type | Default | Purpose |
 |---|---|---|---|
@@ -113,6 +113,7 @@ Four files in `web/`, embedded at compile time via `assets.FS`:
 | `password_text` | string | (empty) | Plaintext password — hashed and removed on startup |
 | `password_hash` | string | `<argon2id>` | Argon2id hash (set automatically from `password_text`) |
 | `default_command` | []string | `[powershell.exe]` | Command launched in new PTY sessions |
+| `default_work_dir` | string | `""` | Working directory for new sessions (empty = inherit from binary) |
 | `max_sessions` | int | `32` | Maximum concurrent PTY sessions |
 | `buffer_size` | int | `1048576` | Ring buffer size per session (1 MB) |
 | `log_level` | string | `debug` | `debug`, `error`, or `none` |

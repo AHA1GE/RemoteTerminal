@@ -42,6 +42,7 @@ Open `https://127.0.0.1:8443` in a browser (accept the self-signed cert warning)
 | `password_text` | string | (empty) | Plaintext password — hashed and removed on startup |
 | `password_hash` | string | `<argon2id>` | Argon2id hash (set automatically from `password_text`) |
 | `default_command` | []string | `[powershell.exe]` | Command launched in new PTY sessions |
+| `default_work_dir` | string | `""` | Working directory for new sessions (empty = inherit from binary) |
 | `max_sessions` | int | `32` | Maximum concurrent PTY sessions |
 | `buffer_size` | int | `1048576` | Ring buffer size per session (1 MB) |
 | `log_level` | string | `debug` | `debug`, `error`, or `none` |

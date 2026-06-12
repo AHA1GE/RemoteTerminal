@@ -15,6 +15,9 @@ password_hash: <argon2id>
 default_command:
   - powershell.exe
 
+# Default working directory for new PTY sessions (empty = inherit from binary directory)
+default_work_dir: ""
+
 # Maximum concurrent PTY sessions
 max_sessions: 32
 

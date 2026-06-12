@@ -14,6 +14,7 @@ type Config struct {
 	PasswordHash   string   `yaml:"password_hash,omitempty"`
 	PasswordText   *string  `yaml:"password_text,omitempty"`
 	DefaultCommand []string `yaml:"default_command"`
+	DefaultWorkDir string   `yaml:"default_work_dir"`
 	MaxSessions    int      `yaml:"max_sessions"`
 	BufferSize     int      `yaml:"buffer_size"`
 	LogLevel       string   `yaml:"log_level"`
@@ -27,6 +28,7 @@ func Default() Config {
 		PasswordHash:   "<argon2id>",
 		PasswordText:   &emptyText,
 		DefaultCommand: []string{"powershell.exe"},
+		DefaultWorkDir: "",
 		MaxSessions:    32,
 		BufferSize:     1048576,
 		LogLevel:       "debug",

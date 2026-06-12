@@ -478,7 +478,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		cmd = []string{"powershell.exe"}
 	}
 
-	session, err := s.ptySessions.Create(cmd, 80, 24, s.cfg.BufferSize)
+	session, err := s.ptySessions.Create(cmd, 80, 24, s.cfg.BufferSize, s.cfg.DefaultWorkDir)
 	if err != nil {
 		s.log.Error("failed to create PTY session", map[string]interface{}{"error": err.Error()})
 		if strings.Contains(err.Error(), "max sessions") {
@@ -710,6 +710,32 @@ func main() {
 				"error":   err.Error(),
 			})
 			os.Exit(1)
+		}
+	}
+
+	// 5b. Validate default_work_dir is accessible (non-fatal; reset and continue on failure).
+	if cfg.DefaultWorkDir != "" {
+		if info, err := os.Stat(cfg.DefaultWorkDir); err != nil {
+			log.Error("default_work_dir not accessible, resetting to empty", map[string]interface{}{
+				"path":  cfg.DefaultWorkDir,
+				"error": err.Error(),
+			})
+			cfg.DefaultWorkDir = ""
+			if saveErr := config.Save(configPath, cfg); saveErr != nil {
+				log.Error("failed to save config after resetting default_work_dir", map[string]interface{}{
+					"error": saveErr.Error(),
+				})
+			}
+		} else if !info.IsDir() {
+			log.Error("default_work_dir is not a directory, resetting to empty", map[string]interface{}{
+				"path": cfg.DefaultWorkDir,
+			})
+			cfg.DefaultWorkDir = ""
+			if saveErr := config.Save(configPath, cfg); saveErr != nil {
+				log.Error("failed to save config after resetting default_work_dir", map[string]interface{}{
+					"error": saveErr.Error(),
+				})
+			}
 		}
 	}
 
