@@ -21,7 +21,10 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
+	"github.com/AHA1GE/RemoteTerminal/internal/auth"
 	"github.com/AHA1GE/RemoteTerminal/internal/config"
+	"github.com/AHA1GE/RemoteTerminal/internal/pty"
+	"github.com/AHA1GE/RemoteTerminal/internal/websocket"
 
 	// Root-level assets package (embed.go with //go:embed web/*)
 	assets "github.com/AHA1GE/RemoteTerminal"
@@ -208,19 +211,36 @@ func generatePasswordHash(password string) (string, error) {
 // =============================================================================
 
 type Server struct {
-	cfg      config.Config
-	log      *Logger
-	sessions *SessionStore
-	httpSrv  *http.Server
-	exeDir   string
+	cfg         config.Config
+	log         *Logger
+	sessions    *SessionStore
+	ptySessions *pty.PtySessionStore
+	wsHandler   *websocket.Handler
+	blacklist   *auth.IPBlacklist
+	httpSrv     *http.Server
+	exeDir      string
 }
 
 func NewServer(cfg config.Config, log *Logger, exeDir string) *Server {
+	// Load or create the IP blacklist.
+	blPath := filepath.Join(exeDir, "blacklist.txt")
+	bl, err := auth.NewIPBlacklist(blPath)
+	if err != nil {
+		log.Error("failed to load blacklist", map[string]interface{}{"error": err.Error()})
+		// Continue with an empty blacklist.
+		bl, _ = auth.NewIPBlacklist("")
+	}
+
+	ptySessions := pty.NewPtySessionStore(cfg.MaxSessions)
+
 	return &Server{
-		cfg:      cfg,
-		log:      log,
-		sessions: NewSessionStore(),
-		exeDir:   exeDir,
+		cfg:         cfg,
+		log:         log,
+		sessions:    NewSessionStore(),
+		ptySessions: ptySessions,
+		wsHandler:   websocket.NewHandler(ptySessions, log),
+		blacklist:   bl,
+		exeDir:      exeDir,
 	}
 }
 
@@ -242,6 +262,19 @@ func (s *Server) apiAuthMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) wsAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("session_token")
+		if err != nil || !s.sessions.Validate(cookie.Value) {
+			// WebSocket upgrade cannot read a response body, so just
+			// return 401 with no content.
+			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -300,6 +333,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Blacklist check: reject before attempting password verification.
+	clientIP := s.blacklist.ClientIP(r)
+	if s.blacklist.IsBlacklisted(clientIP) {
+		s.log.Debug("login from blacklisted IP", map[string]interface{}{"ip": clientIP})
+		http.Error(w, "Access denied.", http.StatusForbidden)
+		return
+	}
+
 	password := r.FormValue("password")
 	ok, err := verifyPassword(password, s.cfg.PasswordHash)
 	if err != nil {
@@ -308,10 +349,20 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		s.log.Debug("login failed", map[string]interface{}{"remote_addr": r.RemoteAddr})
+		blacklisted, blErr := s.blacklist.RecordFailedAttempt(clientIP)
+		if blErr != nil {
+			s.log.Error("blacklist write error", map[string]interface{}{"error": blErr.Error()})
+		}
+		if blacklisted {
+			s.log.Debug("IP blacklisted", map[string]interface{}{"ip": clientIP})
+		}
+		s.log.Debug("login failed", map[string]interface{}{"ip": clientIP})
 		http.Error(w, "invalid password", http.StatusUnauthorized)
 		return
 	}
+
+	// Successful login resets the failed-attempt counter.
+	s.blacklist.ResetAttempts(clientIP)
 
 	sessionToken, err := generateToken()
 	if err != nil {
@@ -331,7 +382,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 
-	s.log.Debug("login successful", map[string]interface{}{"remote_addr": r.RemoteAddr})
+	s.log.Debug("login successful", map[string]interface{}{"ip": clientIP})
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -364,7 +415,8 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 	})
 
-	s.log.Debug("logout", map[string]interface{}{"remote_addr": r.RemoteAddr})
+	clientIP := s.blacklist.ClientIP(r)
+	s.log.Debug("logout", map[string]interface{}{"ip": clientIP})
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
@@ -383,8 +435,18 @@ func (s *Server) handleTerminalPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
+	sessions := s.ptySessions.List()
+	result := make([]map[string]interface{}, 0, len(sessions))
+	for _, sess := range sessions {
+		result = append(result, map[string]interface{}{
+			"id":           sess.ID,
+			"created_at":   sess.CreatedAt.Format(time.RFC3339),
+			"last_seen_at": sess.LastSeenAt.Format(time.RFC3339),
+			"running":      !sess.Closed(),
+		})
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode([]interface{}{})
+	json.NewEncoder(w).Encode(result)
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -396,9 +458,27 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid csrf token", http.StatusForbidden)
 		return
 	}
+
+	cmd := s.cfg.DefaultCommand
+	if len(cmd) == 0 {
+		cmd = []string{"pwsh.exe"}
+	}
+
+	session, err := s.ptySessions.Create(cmd, 80, 24, s.cfg.BufferSize)
+	if err != nil {
+		s.log.Error("failed to create PTY session", map[string]interface{}{"error": err.Error()})
+		if strings.Contains(err.Error(), "max sessions") {
+			http.Error(w, err.Error(), http.StatusConflict)
+		} else {
+			http.Error(w, "failed to create session", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	s.log.Debug("PTY session created", map[string]interface{}{"session_id": session.ID})
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusNotImplemented)
-	json.NewEncoder(w).Encode(map[string]string{"error": "PTY sessions not yet implemented"})
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"id": session.ID})
 }
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
@@ -410,6 +490,19 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid csrf token", http.StatusForbidden)
 		return
 	}
+
+	sessionID := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	if sessionID == "" || strings.Contains(sessionID, "/") {
+		http.Error(w, "invalid session id", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.ptySessions.Delete(sessionID); err != nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+
+	s.log.Debug("PTY session deleted", map[string]interface{}{"session_id": sessionID})
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -446,6 +539,9 @@ func (s *Server) setupRoutes() http.Handler {
 
 	// Static files (no auth needed for app.js)
 	mux.HandleFunc("/app.js", s.handleStatic)
+
+	// WebSocket (protected by session_token cookie, validated on upgrade)
+	mux.Handle("/ws/", s.wsAuthMiddleware(s.wsHandler))
 
 	// Protected page routes
 	protectedPage := s.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -503,12 +599,22 @@ func (s *Server) setupRoutes() http.Handler {
 func (s *Server) Shutdown(ctx context.Context) {
 	s.log.Debug("shutting down server", nil)
 
+	// Step 1: Stop accepting new HTTP connections.
 	shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	if err := s.httpSrv.Shutdown(shutdownCtx); err != nil {
 		s.log.Error("HTTP server shutdown error", map[string]interface{}{"error": err.Error()})
 	}
+
+	// Steps 2-4: Close all PTYs (closing the PTY file descriptor terminates
+	// child processes via the ConPTY layer).
+	s.ptySessions.CloseAll()
+
+	// Step 5: Close all WebSocket connections.
+	s.wsHandler.CloseAll()
+
+	// Step 6: Auth session store is in-memory and dies with the process.
 
 	s.log.Debug("server stopped", nil)
 }
@@ -548,22 +654,34 @@ func main() {
 		os.Exit(0)
 	}
 
-	// 4. Validate password_hash is set
-	if cfg.PasswordHash == "" || cfg.PasswordHash == "<argon2id>" {
-		randomPassword, _ := generateToken()
-		randomPassword = randomPassword[:16]
-		hash, err := generatePasswordHash(randomPassword)
+	// 4. Resolve password: if password_text is set, hash it into password_hash
+	//    and remove password_text. If password_hash is still a placeholder and
+	//    password_text is empty, add password_text to config and exit so the
+	//    user can set it.
+	if cfg.PasswordText != nil && *cfg.PasswordText != "" {
+		hash, err := generatePasswordHash(*cfg.PasswordText)
 		if err != nil {
 			log.Error("failed to generate password hash", map[string]interface{}{"error": err.Error()})
-			log.Error("password_hash not set in config.yaml", nil)
 			os.Exit(1)
 		}
-		fmt.Println("password_hash not set in config.yaml")
-		fmt.Println("")
-		fmt.Printf("Generated password: %s\n", randomPassword)
-		fmt.Printf("Add this to your config.yaml:\n  password_hash: %s\n", hash)
-		fmt.Println("")
-		fmt.Println("Alternatively, generate your own with any argon2id tool.")
+		cfg.PasswordHash = hash
+		cfg.PasswordText = nil // remove from config
+		if saveErr := config.Save(configPath, cfg); saveErr != nil {
+			log.Error("failed to save config after hashing password", map[string]interface{}{"error": saveErr.Error()})
+		}
+		fmt.Println("Password hashed and saved to config.yaml.")
+	} else if cfg.PasswordHash == "" || cfg.PasswordHash == "<argon2id>" {
+		// No password configured: ensure password_text field exists so the
+		// user can edit it.
+		if cfg.PasswordText == nil {
+			emptyText := ""
+			cfg.PasswordText = &emptyText
+		}
+		if saveErr := config.Save(configPath, cfg); saveErr != nil {
+			log.Error("failed to save config", map[string]interface{}{"error": saveErr.Error()})
+		}
+		fmt.Println("Password not configured.")
+		fmt.Printf("Edit %s, set password_text, and restart.\n", configPath)
 		os.Exit(1)
 	}
 
