@@ -13,7 +13,7 @@ password_hash: <argon2id>
 
 # Default command launched in new PTY sessions
 default_command:
-  - pwsh.exe
+  - powershell.exe
 
 # Maximum concurrent PTY sessions
 max_sessions: 32

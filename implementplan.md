@@ -430,7 +430,7 @@ Configuration:
 
 ```yaml
 default_command:
-  - pwsh.exe
+  - powershell.exe
 ```
 
 Alternative examples:
@@ -773,7 +773,7 @@ password_text:
 password_hash: <argon2id>
 
 default_command:
-  - pwsh.exe
+  - powershell.exe
 
 max_sessions: 32
 

@@ -26,7 +26,7 @@ func Default() Config {
 		Listen:         "127.0.0.1:8443",
 		PasswordHash:   "<argon2id>",
 		PasswordText:   &emptyText,
-		DefaultCommand: []string{"pwsh.exe"},
+		DefaultCommand: []string{"powershell.exe"},
 		MaxSessions:    32,
 		BufferSize:     1048576,
 		LogLevel:       "debug",

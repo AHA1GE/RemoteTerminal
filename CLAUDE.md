@@ -112,7 +112,7 @@ Four files in `web/`, embedded at compile time via `assets.FS`:
 | `listen` | string | `127.0.0.1:8443` | HTTPS listen address |
 | `password_text` | string | (empty) | Plaintext password — hashed and removed on startup |
 | `password_hash` | string | `<argon2id>` | Argon2id hash (set automatically from `password_text`) |
-| `default_command` | []string | `[pwsh.exe]` | Command launched in new PTY sessions |
+| `default_command` | []string | `[powershell.exe]` | Command launched in new PTY sessions |
 | `max_sessions` | int | `32` | Maximum concurrent PTY sessions |
 | `buffer_size` | int | `1048576` | Ring buffer size per session (1 MB) |
 | `log_level` | string | `debug` | `debug`, `error`, or `none` |

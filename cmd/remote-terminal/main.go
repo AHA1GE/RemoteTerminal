@@ -461,7 +461,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 
 	cmd := s.cfg.DefaultCommand
 	if len(cmd) == 0 {
-		cmd = []string{"pwsh.exe"}
+		cmd = []string{"powershell.exe"}
 	}
 
 	session, err := s.ptySessions.Create(cmd, 80, 24, s.cfg.BufferSize)
