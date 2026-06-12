@@ -155,7 +155,29 @@
         cursorBlink: true,
         fontSize: 14,
         fontFamily: 'Consolas, "Courier New", monospace',
-        theme: { background: '#000000', foreground: '#cccccc' }
+        theme: {
+          background: '#ffffff',
+          foreground: '#1a1a2e',
+          cursor: '#0066cc',
+          cursorAccent: '#ffffff',
+          selectionBackground: '#0066cc40',
+          black: '#2e2e2e',
+          red: '#c41a16',
+          green: '#007400',
+          yellow: '#9c6500',
+          blue: '#0451a5',
+          magenta: '#a626a4',
+          cyan: '#0184bc',
+          white: '#d0d0d0',
+          brightBlack: '#666666',
+          brightRed: '#e0251d',
+          brightGreen: '#009100',
+          brightYellow: '#c48400',
+          brightBlue: '#0066cc',
+          brightMagenta: '#bc05bc',
+          brightCyan: '#0097c4',
+          brightWhite: '#ffffff'
+        }
       });
 
       var fitAddon = new FitAddon.FitAddon();
@@ -199,7 +221,7 @@
         ws.onclose = function (e) {
           ws = null;
           if (e.code === 1000) {
-            term.writeln('\r\n\x1b[33mSession ended.\x1b[0m');
+            term.writeln('\r\n\x1b[34mSession ended.\x1b[0m');
           } else {
             term.writeln('\r\n\x1b[31mDisconnected. Reconnecting in 3s…\x1b[0m');
             if (reconnectTimer) clearTimeout(reconnectTimer);
