@@ -8,9 +8,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -303,6 +305,17 @@ func (s *Server) ensureCSRF(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) validateCSRF(r *http.Request) bool {
 	bodyToken := r.FormValue("csrf_token")
+
+	// Go's net/http only parses the request body for PATCH/POST/PUT.
+	// For DELETE we must read and parse the body ourselves.
+	if bodyToken == "" && r.Method == http.MethodDelete {
+		if body, err := io.ReadAll(r.Body); err == nil {
+			if values, err := url.ParseQuery(string(body)); err == nil {
+				bodyToken = values.Get("csrf_token")
+			}
+		}
+	}
+
 	cookie, err := r.Cookie("csrf_token")
 	if err != nil {
 		return false

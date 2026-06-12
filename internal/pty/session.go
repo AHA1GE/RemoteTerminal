@@ -30,6 +30,7 @@ type PtySession struct {
 
 	mu          sync.Mutex
 	closed      bool
+	onClose     func()                       // called once when the session closes (removes from store)
 	subsClosed  bool                        // set true after subscriber channels are cleaned up
 	subscribers map[string]chan<- []byte     // connID → output channel
 	subMu       sync.RWMutex
@@ -103,6 +104,14 @@ func (s *PtySessionStore) Create(cmd []string, width, height, bufferSize int) (*
 		Height:      height,
 		RingBuffer:  NewCircularBuffer(bufferSize),
 		subscribers: make(map[string]chan<- []byte),
+	}
+
+	// When the session closes (process exit or explicit delete), remove
+	// it from the store.
+	sess.onClose = func() {
+		s.mu.Lock()
+		delete(s.sessions, id)
+		s.mu.Unlock()
 	}
 
 	s.sessions[id] = sess
@@ -197,6 +206,12 @@ func (ps *PtySession) Close() error {
 	// Clean up subscriber channels. Guarded by subsClosed so we don't
 	// double-close if the read loop already cleaned up.
 	ps.cleanupSubscribers()
+
+	// Remove from the session store (whether closed by user action
+	// or by process exit).
+	if ps.onClose != nil {
+		ps.onClose()
+	}
 
 	return err
 }
