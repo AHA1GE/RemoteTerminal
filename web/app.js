@@ -166,17 +166,77 @@
       term.open(termEl);
       fitAddon.fit();
 
-      window.addEventListener('resize', function () { fitAddon.fit(); });
+      // ---- WebSocket ----
+      var ws = null;
+      var reconnectTimer = null;
+      var protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+      var wsUrl = protocol + window.location.host + '/ws/' + sessionId;
 
-      // Placeholder: WebSocket not yet implemented in backend
-      term.writeln('Remote Terminal — hello world');
-      term.writeln('Session: ' + sessionId);
-      term.writeln('WebSocket support coming soon.');
-      term.writeln('');
+      function connect() {
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+          return;
+        }
+
+        ws = new WebSocket(wsUrl);
+        ws.binaryType = 'arraybuffer';
+
+        ws.onopen = function () {
+          if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+          }
+          sendResize();
+        };
+
+        ws.onmessage = function (e) {
+          if (e.data instanceof ArrayBuffer) {
+            term.write(new Uint8Array(e.data));
+          } else if (typeof e.data === 'string') {
+            term.write(e.data);
+          }
+        };
+
+        ws.onclose = function (e) {
+          ws = null;
+          if (e.code === 1000) {
+            term.writeln('\r\n\x1b[33mSession ended.\x1b[0m');
+          } else {
+            term.writeln('\r\n\x1b[31mDisconnected. Reconnecting in 3s…\x1b[0m');
+            if (reconnectTimer) clearTimeout(reconnectTimer);
+            reconnectTimer = setTimeout(connect, 3000);
+          }
+        };
+
+        ws.onerror = function () {
+          // onclose fires next.
+        };
+      }
+
+      function sendResize() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        var dims = fitAddon.proposeDimensions();
+        if (dims && dims.cols > 0 && dims.rows > 0) {
+          ws.send('\x01' + JSON.stringify({ cols: dims.cols, rows: dims.rows }));
+        }
+      }
 
       term.onData(function (data) {
-        // Will forward to WebSocket once implemented
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(data);
+        }
       });
+
+      term.onResize(function (dims) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send('\x01' + JSON.stringify({ cols: dims.cols, rows: dims.rows }));
+        }
+      });
+
+      window.addEventListener('resize', function () {
+        fitAddon.fit();
+      });
+
+      connect();
     }
   }
 })();
