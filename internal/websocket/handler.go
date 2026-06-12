@@ -218,8 +218,6 @@ func (h *Handler) pinger(conn *websocket.Conn, done <-chan struct{}) {
 				return
 			}
 		case <-done:
-			// Send a final ping before exiting so we don't leave
-			// a send on the write deadline unpaired.
 			return
 		}
 	}
@@ -237,23 +235,30 @@ func (h *Handler) inputReader(conn *websocket.Conn, session *pty.PtySession, pc 
 			return
 		}
 
-		// Only binary messages are expected (raw terminal input or resize control).
-		if msgType != websocket.BinaryMessage {
+		// Accept both text and binary frames. Plain ws.send("hello")
+		// works on every browser without TextEncoder overhead.
+		var data []byte
+		switch msgType {
+		case websocket.BinaryMessage:
+			data = message
+		case websocket.TextMessage:
+			data = []byte(message)
+		default:
 			continue
 		}
 
-		if len(message) == 0 {
+		if len(data) == 0 {
 			continue
 		}
 
 		// Resize control message: 0x01 prefix + JSON {cols, rows}.
-		if message[0] == 0x01 {
-			h.handleResize(session, message[1:])
+		if data[0] == 0x01 {
+			h.handleResize(session, data[1:])
 			continue
 		}
 
 		// Keyboard input / paste — apply input multiplexing.
-		h.processInput(session, pc, message)
+		h.processInput(session, pc, data)
 	}
 }
 
