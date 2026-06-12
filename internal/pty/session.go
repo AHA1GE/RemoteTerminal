@@ -18,7 +18,8 @@ type PtySession struct {
 	CreatedAt time.Time
 	LastSeenAt time.Time
 
-	pty    *goPty.Pty
+	pty    goPty.Pty  // interface — not a pointer
+	cmd    *goPty.Cmd // the running command
 	Width  int
 	Height int
 
@@ -68,15 +69,24 @@ func (s *PtySessionStore) Create(cmd []string, width, height, bufferSize int) (*
 		return nil, fmt.Errorf("generate session id: %w", err)
 	}
 
-	// go-pty requires at least one arg (the command name)
-	name, args := cmd[0], cmd[1:]
-
-	pt, err := goPty.NewWithOptions(
-		goPty.WithCommand(name, args...),
-		goPty.WithSize(width, height),
-	)
+	// Create the PTY.
+	pt, err := goPty.New()
 	if err != nil {
 		return nil, fmt.Errorf("create PTY: %w", err)
+	}
+
+	// Set initial terminal size.
+	if err := pt.Resize(width, height); err != nil {
+		pt.Close()
+		return nil, fmt.Errorf("resize PTY: %w", err)
+	}
+
+	// Launch the configured command inside the PTY.
+	name, args := cmd[0], cmd[1:]
+	c := pt.Command(name, args...)
+	if err := c.Start(); err != nil {
+		pt.Close()
+		return nil, fmt.Errorf("start command: %w", err)
 	}
 
 	if bufferSize <= 0 {
@@ -88,6 +98,7 @@ func (s *PtySessionStore) Create(cmd []string, width, height, bufferSize int) (*
 		CreatedAt:   time.Now(),
 		LastSeenAt:  time.Now(),
 		pty:         pt,
+		cmd:         c,
 		Width:       width,
 		Height:      height,
 		RingBuffer:  NewCircularBuffer(bufferSize),
@@ -98,6 +109,11 @@ func (s *PtySessionStore) Create(cmd []string, width, height, bufferSize int) (*
 
 	// Start the read loop in a background goroutine.
 	go sess.readLoop()
+
+	// Reap the process when it exits so we don't leak zombies.
+	go func() {
+		c.Wait()
+	}()
 
 	return sess, nil
 }
