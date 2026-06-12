@@ -8,10 +8,35 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #000; }
-  #terminal { width: 100vw; height: 100vh; }
+  #toolbar {
+    display: flex; align-items: center; gap: 4px;
+    height: 32px; padding: 0 6px;
+    background: #1a1a1a;
+    border-bottom: 1px solid #333;
+    -webkit-user-select: none; user-select: none;
+  }
+  #toolbar button {
+    height: 24px; min-width: 42px; padding: 0 8px;
+    border: 1px solid #444; border-radius: 3px;
+    background: #2a2a2a; color: #aaa;
+    font-family: Consolas, "Courier New", monospace; font-size: 12px;
+    cursor: pointer; outline: none;
+  }
+  #toolbar button:active { background: #3a3a3a; }
+  #toolbar button.armed {
+    background: #1a5c2a; border-color: #2a8c3a; color: #8f8;
+  }
+  #toolbar .spacer { flex: 1; }
+  #terminal { width: 100vw; height: calc(100vh - 32px); }
 </style>
 </head>
 <body>
+<div id="toolbar">
+  <button id="btn-esc" title="Escape">Esc</button>
+  <button id="btn-ctrl" title="Control">Ctrl</button>
+  <button id="btn-alt" title="Alt / Meta">Alt</button>
+  <span class="spacer"></span>
+</div>
 <div id="terminal"></div>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>

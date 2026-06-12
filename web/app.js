@@ -220,8 +220,62 @@
         }
       }
 
+      // ---- toolbar modifier buttons ----
+      var armed = { ctrl: false, alt: false };
+      var btnEsc = document.getElementById('btn-esc');
+      var btnCtrl = document.getElementById('btn-ctrl');
+      var btnAlt = document.getElementById('btn-alt');
+
+      function updateButtons() {
+        if (btnCtrl) btnCtrl.className = armed.ctrl ? 'armed' : '';
+        if (btnAlt) btnAlt.className = armed.alt ? 'armed' : '';
+      }
+
+      function disarmAll() {
+        armed.ctrl = false;
+        armed.alt = false;
+        updateButtons();
+      }
+
+      if (btnEsc) {
+        btnEsc.addEventListener('click', function () {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send('\x1b');
+          }
+          disarmAll();
+        });
+      }
+
+      if (btnCtrl) {
+        btnCtrl.addEventListener('click', function () {
+          armed.ctrl = !armed.ctrl;
+          updateButtons();
+        });
+      }
+
+      if (btnAlt) {
+        btnAlt.addEventListener('click', function () {
+          armed.alt = !armed.alt;
+          updateButtons();
+        });
+      }
+
       term.onData(function (data) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        if (armed.ctrl || armed.alt) {
+          // Build the combo: Alt sends ESC prefix, Ctrl maps the key to
+          // its control character (e.g. Ctrl+C -> \x03).
+          var result = '';
+          if (armed.alt) result += '\x1b';
+          if (armed.ctrl) {
+            result += String.fromCharCode(data.charCodeAt(0) & 0x1f);
+          } else {
+            result += data;
+          }
+          ws.send(result);
+          disarmAll();
+        } else {
           ws.send(data);
         }
       });
