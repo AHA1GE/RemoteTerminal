@@ -110,9 +110,12 @@ func (s *PtySessionStore) Create(cmd []string, width, height, bufferSize int) (*
 	// Start the read loop in a background goroutine.
 	go sess.readLoop()
 
-	// Reap the process when it exits so we don't leak zombies.
+	// When the process exits, close the PTY. This unblocks the read
+	// loop (ConPTY pipes stay open even after the child exits), triggers
+	// subscriber cleanup, and marks the session as closed.
 	go func() {
 		c.Wait()
+		sess.Close()
 	}()
 
 	return sess, nil
