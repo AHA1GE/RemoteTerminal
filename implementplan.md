@@ -163,13 +163,21 @@ Cloudflare Tunnel is configured to connect to `https://127.0.0.1:8443` with TLS 
 
 Simple HTTPS login.
 
-Configuration stores:
+The user sets a plaintext password in `config.yaml`:
 
 ```yaml
-password_hash: <argon2id hash>
+password_text: mypassword
 ```
 
-Generated externally by the user (any argon2id tool) and pasted into config.yaml.
+On startup, the binary hashes the value with Argon2id, writes the hash to `password_hash`, and removes `password_text` from the file. No CLI tools, no manual hash pasting. To change the password, add `password_text` back with a new value and restart.
+
+After the first run, only the hash remains:
+
+```yaml
+password_hash: $argon2id$v=19$m=65536,t=3,p=2$...
+```
+
+The plaintext password exists in the config file only transiently — it is removed automatically after hashing.
 
 ---
 
@@ -751,13 +759,17 @@ All platforms use this convention. No platform-specific config paths.
 
 ## Startup Behavior
 
-See [CLI](#cli) for the full startup flow. In summary: config must have a real `password_hash` value before the server will start. If config is missing, a default is generated and the binary exits. If `password_hash` is still the placeholder, the binary exits with an error.
+See [CLI](#cli) for the full startup flow. In summary: on first run, the user sets `password_text` in config.yaml. The binary hashes it to `password_hash` and removes `password_text`. If `password_hash` is still the placeholder and `password_text` is empty, the binary adds an empty `password_text` field and exits with instructions. The plaintext password exists only transiently — it is removed automatically.
 
 ## Example
 
 ```yaml
 listen: 127.0.0.1:8443
 
+# Set on first run; the binary hashes it and removes this field.
+password_text:
+
+# Set automatically from password_text on first run.
 password_hash: <argon2id>
 
 default_command:
@@ -801,9 +813,7 @@ Application remains tunnel agnostic.
 Argon2id
 ```
 
-only.
-
-No plaintext storage.
+The password is stored as an Argon2id hash (`password_hash` field). The user sets a plaintext password in `password_text` on first run; the binary hashes it immediately and removes the plaintext field. No plaintext is stored persistently — `password_text` exists only transiently until the next startup.
 
 ---
 
@@ -983,7 +993,7 @@ On these errors, log at `error` level and call `os.Exit(1)`:
 
 ```text
 - config.yaml not found
-- password_hash not set in config.yaml
+- password not configured (password_text is empty and password_hash is still the placeholder)
 - TLS certificate not found or invalid (cert.pem + key.pem must exist in binary directory)
 - listen address already in use
 - embedded static files fail to load (compile-time issue, should never happen)
@@ -1035,11 +1045,21 @@ When the binary runs, it executes in this order:
    │   → Print: "Edit this file, then restart."
    │   → Exit (non-zero)
    │
-   ├── Found but password_hash is empty or still the placeholder "<argon2id>":
-   │   → Log error: "password_hash not set in config.yaml"
+   ├── Found with password_text set to a non-empty value:
+   │   → Hash the plaintext with Argon2id
+   │   → Write hash to password_hash
+   │   → Remove password_text from config
+   │   → Save config
+   │   → Continue to step 3
+   │
+   ├── Found but password_hash is empty/placeholder AND password_text is empty:
+   │   → Ensure password_text field exists in config
+   │   → Save config
+   │   → Print: "Password not configured."
+   │   → Print: "Edit <binary-dir>/config.yaml, set password_text, and restart."
    │   → Exit (non-zero)
    │
-   └── Found and valid:
+   └── Found with valid password_hash and no password_text:
        → Continue to step 3
 
 3. Look for cert.pem + key.pem in the binary's directory
@@ -1051,9 +1071,11 @@ When the binary runs, it executes in this order:
    └── Found and valid:
        → Load and use them
 
-4. Print help info to stdout
+4. Load blacklist.txt (missing file is OK)
 
-5. Start HTTPS server
+5. Print help info to stdout
+
+6. Start HTTPS server
 ```
 
 ## Help Output
@@ -1085,11 +1107,14 @@ The binary accepts no arguments, no flags, and no subcommands. If any argument i
 │       └── main.go
 ├── internal/
 │   ├── auth/
+│   │   └── blacklist.go
 │   ├── config/
+│   │   └── config.go
 │   ├── pty/
-│   ├── session/
-│   ├── websocket/
-│   └── web/
+│   │   ├── circular.go
+│   │   └── session.go
+│   └── websocket/
+│       └── handler.go
 │
 ├── web/
 │   ├── login.html
@@ -1097,11 +1122,13 @@ The binary accepts no arguments, no flags, and no subcommands. If any argument i
 │   ├── terminal.html
 │   └── app.js
 │
+├── embed.go
 ├── configs/
 │   └── config.sample.yaml
 │
 ├── .github/
 │   └── workflows/
+│       └── build.yml
 │
 ├── go.mod
 └── go.sum
@@ -1160,7 +1187,7 @@ Artifacts published automatically on tagged releases.
 * Structured JSON logging to stdout (debug/error/none via log_level config)
 * Startup help printed on successful launch
 * Default config generated if none found, binary exits with instructions
-* Binary exits with error if password_hash not set
+* Binary hashes password_text to password_hash and removes password_text on startup
 * Fatal errors log and exit; runtime errors log and continue
 * No CLI arguments, flags, or subcommands accepted
 * Single executable deployment (static assets embedded via go:embed)
